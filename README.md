@@ -1,5 +1,7 @@
 # Snor
 
+[![Build Status](https://travis-ci.com/biswarupchakravarty/snor.svg?branch=master)](https://travis-ci.com/biswarupchakravarty/snor)
+
 **TODO: Add description**
 
 ## Installation
