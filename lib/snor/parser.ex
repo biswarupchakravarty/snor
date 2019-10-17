@@ -1,6 +1,19 @@
 defmodule Snor.Parser do
+  @moduledoc """
+  Convert a string into an intermediate representation - a list of nodes.
+
+  A node could be one of (mainly) -
+
+  - A raw value, which is a verbatim string
+  - An value to be interpolated
+  - A custom function to be called, and the arguments
+  """
+
   @type template_node :: any()
 
+  @doc """
+  Parse a string into a list of nodes
+  """
   @spec parse(binary()) :: [template_node()]
   def parse(<<string::binary>>), do: parse(string, string, 0, 0, false, false, [])
 
