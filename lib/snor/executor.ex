@@ -16,6 +16,25 @@ defmodule Snor.Executor do
     |> Enum.join()
   end
 
+  # open negative scope ^
+  #
+  # When this happens, we re-push the current scope to the top of the stack
+  # if the value lookup is absent.
+  # If the value lookup is present, we push a skip scope to the stack
+  #
+  # The close scope operator takes case of the validations
+  defp execute_node(_helpers, %{val: <<94, key::binary>>}, context, results) do
+    %{scope: scope, stack: stack} = context
+
+    target =
+      case Utils.deep_get(scope, key, nil) do
+        nil -> scope
+        _ -> %{skip: true}
+      end
+
+    {%{context | scope: target, stack: [{key, scope} | stack]}, results}
+  end
+
   # open scope #
   defp execute_node(_helpers, %{val: <<35, key::binary>>}, context, results) do
     %{scope: scope, stack: stack} = context

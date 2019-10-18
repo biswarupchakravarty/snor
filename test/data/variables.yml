@@ -210,6 +210,36 @@
       membership: Yes
   result: "Details - Amsterdam,  Yes"
 
+- name: Using a key as a truthy check
+  template: "{{#person}}Hello There!{{/person}}"
+  result: "Hello There!"
+  data:
+    person:
+      name: Jill
+
+# Negative scope (unless operator)
+- name: Simple negative scope
+  template: "{{^person}}There's no-one here!{{/person}}"
+  result: "There's no-one here!"
+
+- name: Negative scope, key has value
+  template: "{{^person}}There's no-one here!{{/person}}"
+  result: ""
+  data:
+    person:
+      name: "Adam"
+
+- name: Combine negative and positive scopes, truthy path
+  template: "{{#person}}Hello there!{{/person}}{{^person}}Empty :({{/person}}"
+  result: "Hello there!"
+  data:
+    person:
+      name: Doesn't matter
+
+- name: Combine negative and positive scopes, falsy path
+  template: "{{#person}}Hello there!{{/person}}{{^person}}Empty :({{/person}}"
+  result: "Empty :("
+
 # Built in functions
 - name: Simple upcase
   template: "{{upcase howdy}}"

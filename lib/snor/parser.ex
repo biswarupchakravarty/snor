@@ -51,6 +51,7 @@ defmodule Snor.Parser do
     )
   end
 
+  # A space character, just make a note and proceed
   defp parse(string, <<32, rest::binary>>, marker, pointer, true, _, tokens) do
     parse(string, rest, marker, pointer + 1, true, true, tokens)
   end
