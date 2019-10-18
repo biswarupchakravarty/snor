@@ -1,0 +1,242 @@
+- name: No variables
+  template: "Hello World"
+  result: "Hello World"
+
+- name: Empty data, no variables
+  template: "Hello World"
+  data:
+  result: "Hello World"
+
+- name: Plain string
+  template: "Hello World {{"
+  data:
+  result: "Hello World {{"
+
+- name: Plain string
+  template: "Hello World }}"
+  data:
+  result: "Hello World }}"
+
+- name: Plain string
+  template: "Hello World }} }} {{"
+  data:
+  result: "Hello World }} }} {{"
+
+- name: Blank interpolation
+  template: "Hello World {{}}"
+  result: "Hello World "
+
+- template: "{{}}"
+  result: ""
+
+- template: "{{{{}}}}"
+  result: "{{}}"
+
+# Variables
+
+- name: Blank interpolation
+  template: "Hello World {{}}"
+  data:
+  result: "Hello World "
+
+- name: Simple variable
+  template: Hello {{var}}
+  data:
+    var: World
+  result: Hello World
+
+- name: Simple variable (missing)
+  template: Hello {{var2}}
+  data:
+    var: World
+  result: "Hello "
+
+- name: Simple name
+  template: "Hello {{name}}"
+  data:
+    name: "John Doe"
+  result: "Hello John Doe"
+
+- name: Mismatched keys
+  template: "Hello {{name}}"
+  data:
+    age: "123"
+  result: "Hello "
+
+- name: Numeric value
+  template: "Hello {{age}}"
+  data:
+    age: 123
+  result: "Hello 123"
+
+- name: Weird chars
+  template: "Hello {{ {{age}}"
+  data:
+    age: 123
+  result: "Hello {{ 123"
+
+- name: Weird chars
+  template: "Hello {{ {{ {{age}}"
+  data:
+    age: 123
+  result: "Hello {{ {{ 123"
+
+- name: Simple tag
+  template: "{{f}}"
+  data:
+    f: "B"
+    l: "C"
+  result: "B"
+
+- template: "{{f}} {{l}}"
+  data:
+    f: B
+    l: C
+  result: B C
+
+# dot syntax for values
+- template: "{{person.name.first}}"
+  data:
+    person:
+      name:
+        first: "John Doe"
+  result: John Doe
+
+- template: "{{person.name}}"
+  data:
+    person:
+      name: "John Doe"
+  result: "John Doe"
+
+- template: "{{person.age}}"
+  data:
+    person:
+      name: "John Doe"
+  result: ""
+
+- template: "{{#person}}{{name.first}}{{/person}}"
+  data:
+    person:
+      name:
+        first: "John Doe"
+  result: "John Doe"
+
+# Scoping
+- name: Simple scoping
+  template: Hi {{#person}}{{name}}{{/person}}
+  result: Hi John Doe
+  data:
+    person:
+      name: John Doe
+
+- name: Simple scoping
+  template: "{{#person}}Hi {{name}}!{{/person}}"
+  result: Hi John Doe!
+  data:
+    person:
+      name: John Doe
+
+- name: Simple scoping
+  template: "{{#person}}Hi {{first_name}} {{last_name}}!{{/person}}"
+  result: Hi John Doe!
+  data:
+    person:
+      first_name: John
+      last_name: Doe
+
+- name: Coming out of a scope
+  template: "{{#person}}{{name}}, {{age}}{{/person}} - {{city}}"
+  result: "John Doe, 123 - Amsterdam"
+  data:
+    person:
+      name: John Doe
+      age: 123
+    city: Amsterdam
+
+- name: Coming out of invalid scope is error
+  template: "{{#person}}{{name}}{{/people}}"
+  error: RuntimeError
+
+- name: Coming out of un-opened scope is error
+  template: "{{name}}{{/people}}"
+  error: RuntimeError
+
+- name: Deeply nested scope
+  template: "{{#country}}{{#city}}{{#street}}{{name}}{{/street}}{{/city}}{{/country}}"
+  result: Main Street
+  data:
+    country:
+      city:
+        street:
+          name: Main Street
+
+- name: Deeply nested scope, incorrect closing is error
+  template: "{{#country}}{{#city}}{{#street}}{{name}}{{/city}}{{/street}}{{/country}}"
+  error: RuntimeError
+  data:
+    country:
+      city:
+        street:
+          name: Main Street
+
+- name: deeply nested scope, non-existant
+  template: "{{#country}}{{#city}}{{#person}}{{name}}, {{age}}{{/person}}{{/country}}{{/city}}"
+  data:
+  error: RuntimeError
+
+- name: Scoping with dot syntax
+  template: "{{#person.name}}{{first}}{{/person.name}}"
+  result: John
+  data:
+    person:
+      name:
+        first: John
+        last: Doe
+
+- name: Skip missing nested property
+  template: "Hello {{#a}}b{{/a}} World"
+  result: "Hello  World"
+
+- name: Deeply nested scope, prints nothing if key doesn't exist
+  template: "Hello {{#country}}{{#city}}{{#person}}Details - {{name}}, {{age}}{{/person}}{{/city}}{{/country}}"
+  result: "Hello "
+
+- name: Deeply nested scope, skips only missing parts
+  template: "{{#country}}{{#city}}Details - {{name}}, {{age}}{{/city}} {{membership}}{{/country}}"
+  data:
+    country:
+      city:
+        name: Amsterdam
+      membership: Yes
+  result: "Details - Amsterdam,  Yes"
+
+# Built in functions
+- name: Simple upcase
+  template: "{{upcase howdy}}"
+  result: HOWDY
+
+- name: Upcase with data
+  template: "Hey {{upcase name}}"
+  result: Hey DUDE
+  data:
+    name: dude
+
+- name: Incorrect number of args is error
+  template: "{{upcase name blah}}"
+  data:
+    name: John Doe
+  error: RuntimeError
+
+- name: Upcase with nested data
+  template: "Hey {{upcase person.name}}"
+  result: Hey DUDE
+  data:
+    person:
+      name: dude
+
+- name: Map style args
+  template: "{{multiply a=5 b=5}}"
+  result: "25"
+  data:
+    a: 5
+    b: 5
