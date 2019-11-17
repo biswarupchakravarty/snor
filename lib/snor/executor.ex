@@ -8,7 +8,7 @@ defmodule Snor.Executor do
     tokens
     |> Enum.reverse()
     |> Enum.reduce(
-      {%{data: data, scope: data, stack: []}, []},
+      {%{data: data, scope: data, stack: [], branches: %{}}, []},
       &execute_node(helpers, &1, elem(&2, 0), elem(&2, 1))
     )
     |> elem(1)
@@ -40,7 +40,15 @@ defmodule Snor.Executor do
     %{scope: scope, stack: stack} = context
     target = Utils.deep_get(scope, key, %{skip: true}) || %{skip: true}
 
-    {%{context | scope: target, stack: [{key, scope} | stack]}, results}
+    case is_list(target) do
+      false ->
+        {%{context | scope: target, stack: [{key, scope} | stack]}, results}
+
+      true ->
+        result_map = Enum.reduce(target, %{}, fn index, acc -> Map.put(acc, index, []) end)
+
+        {%{context | branches: result_map, scope: target, stack: [{key, scope} | stack]}, results}
+    end
   end
 
   # close scope /
@@ -51,7 +59,16 @@ defmodule Snor.Executor do
          results
        )
        when name == key do
-    {%{context | scope: scope, stack: stack}, results}
+    %{branches: branches} = context
+
+    case Enum.empty?(branches) do
+      true ->
+        {%{context | scope: scope, stack: stack}, results}
+
+      false ->
+        all_branches = branches |> Map.values() |> Enum.reduce([], &(&2 ++ &1))
+        {%{context | scope: scope, stack: stack, branches: %{}}, all_branches ++ results}
+    end
   end
 
   # close scope /
@@ -63,18 +80,73 @@ defmodule Snor.Executor do
     do: {context, results}
 
   defp execute_node(_helpers, %{type: :raw, val: val}, context, results) do
-    {context, [val | results]}
+    %{branches: branches} = context
+
+    case Enum.empty?(branches) do
+      true ->
+        {context, [val | results]}
+
+      false ->
+        branches =
+          branches
+          |> Enum.map(fn {scope, results} ->
+            {scope, [val | results]}
+          end)
+          |> Enum.into(%{})
+
+        {%{context | branches: branches}, results}
+    end
   end
 
   defp execute_node(_helpers, %{type: :data, val: val}, context, results) do
-    {context, [Utils.deep_get(context.scope, val, "") | results]}
+    %{branches: branches} = context
+
+    case Enum.empty?(branches) do
+      true ->
+        {context, [Utils.deep_get(context.scope, val, "") | results]}
+
+      _ ->
+        # wow, we are inside a loop construct
+        # let's eagerly execute all the branches of the loop
+
+        branches =
+          branches
+          |> Enum.map(fn {scope, results} ->
+            {scope, [Utils.deep_get(scope, val, "") | results]}
+          end)
+          |> Enum.into(%{})
+
+        {%{context | branches: branches}, results}
+    end
   end
 
   defp execute_node(helpers, %{type: :fn, function: fn_name, args: args}, context, results) do
-    {context,
-     [
-       Kernel.apply(helpers, fn_name, [context.data | args])
-       | results
-     ]}
+    %{branches: branches} = context
+
+    case Enum.empty?(branches) do
+      true ->
+        {context,
+         [
+           Kernel.apply(helpers, fn_name, [context.data | args])
+           | results
+         ]}
+
+      _ ->
+        # wow, we are inside a loop construct
+        # let's eagerly execute all the branches of the loop
+
+        branches =
+          branches
+          |> Enum.map(fn {scope, results} ->
+            {scope,
+             [
+               Kernel.apply(helpers, fn_name, [scope | args])
+               | results
+             ]}
+          end)
+          |> Enum.into(%{})
+
+        {%{context | branches: branches}, results}
+    end
   end
 end

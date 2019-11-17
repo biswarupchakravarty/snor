@@ -240,6 +240,55 @@
   template: "{{#person}}Hello there!{{/person}}{{^person}}Empty :({{/person}}"
   result: "Empty :("
 
+# Looping
+- name: Simple loop
+  template: "{{#people}}{{name}}{{/people}}"
+  result: "JohnJack"
+  data:
+    people:
+      - name: John
+      - name: Jack
+
+- name: Simple loop with raw text
+  template: "{{#people}}Hi {{name}} {{/people}}"
+  result: "Hi John Hi Jack "
+  data:
+    people:
+      - name: John
+      - name: Jack
+
+- name: Single element loop with raw text
+  template: "{{#people}}Hi {{name}}{{/people}}"
+  result: "Hi John"
+  data:
+    people:
+      - name: John
+
+- name: Simple loop with multiple variables
+  template: "{{#people}}Hi {{f_name}} {{l_name}}!{{/people}}"
+  result: "Hi John Doe!"
+  data:
+    people:
+      f_name: John
+      l_name: Doe
+
+      # - name: Nested loop with variable
+      #   template: "{{#people}}{{#pets}}{{type}} {{/pets}}{{/people}}"
+      #   result: "cat dog "
+      #   data:
+      #     people:
+      #       pets:
+      #         - type: cat
+      #         - type: dog
+
+- name: Looping with functions
+  template: "{{#people}}Hi {{upcase name}}\n{{/people}}"
+  result: "Hi JOHN\nHi JANE\n"
+  data:
+    people:
+      - name: John
+      - name: Jane
+
 # Built in functions
 - name: Simple upcase
   template: "{{upcase howdy}}"

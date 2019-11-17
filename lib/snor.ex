@@ -1,6 +1,8 @@
 defmodule Snor do
   @moduledoc """
-  TODO: Documentation for Snor.
+  Snor is a fast and simple implementation of Mustache style templating for Elixir.
+
+  Snor also has support for executing functions.
   """
   alias Snor.{Parser, Executor}
 
