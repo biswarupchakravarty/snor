@@ -2,12 +2,9 @@ defmodule Snor.Helpers do
   require Logger
   alias Snor.Utils
 
-  def upcase(scope, item) do
-    case Map.has_key?(scope, item) do
-      true -> Map.get(scope, item)
-      false -> Utils.deep_get(scope, item, item)
-    end
-    |> String.upcase()
+  def upcase(scope, args) do
+    item = Map.get(args, "item")
+    String.upcase(Snor.NewParser.render(item, scope))
   end
 
   @spec multiply(any(), map()) :: integer()

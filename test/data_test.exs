@@ -22,7 +22,7 @@ defmodule Snor.DataTest do
         case @error do
           nil ->
             test "[#{@index}] #{@name}" do
-              actual_result = Snor.render(@template, @data)
+              actual_result = Snor.NewParser.render(@template, @data)
               assert actual_result == @expected_result
             end
 
