@@ -7,37 +7,12 @@
   data:
   result: "Hello World"
 
-- name: Plain string
-  template: "Hello World {{"
-  data:
-  result: "Hello World {{"
-
-- name: Plain string
-  template: "Hello World }}"
-  data:
-  result: "Hello World }}"
-
-- name: Plain string
-  template: "Hello World }} }} {{"
-  data:
-  result: "Hello World }} }} {{"
-
-- name: Blank interpolation
-  template: "Hello World {{}}"
-  result: "Hello World {{}}"
-
-- template: "{{}}"
-  result: "{{}}"
-
-- template: "{{{{}}}}"
-  result: "{{{{}}}}"
-
 # Variables
 
 - name: Blank interpolation
   template: "Hello World {{}}"
   data:
-  result: "Hello World {{}}"
+  result: "Hello World "
 
 - name: Simple variable
   template: Hello {{var}}
@@ -73,13 +48,13 @@
   template: "Hello {{ {{age}}"
   data:
     age: 123
-  result: "Hello {{ 123"
+  error: ArgumentError
 
 - name: Weird chars
   template: "Hello {{ {{ {{age}}"
   data:
     age: 123
-  result: "Hello {{ {{ 123"
+  error: ArgumentError
 
 - name: Simple tag
   template: "{{f}}"
@@ -157,10 +132,6 @@
   template: "{{#person}}{{name}}{{/people}}"
   error: RuntimeError
 
-- name: Coming out of un-opened scope is error
-  template: "{{name}}{{/people}}"
-  error: RuntimeError
-
 - name: Deeply nested scope
   template: "{{#country}}{{#city}}{{#street}}{{name}}{{/street}}{{/city}}{{/country}}"
   result: Main Street
@@ -178,6 +149,13 @@
       city:
         street:
           name: Main Street
+
+- name: unclosed scope
+  template: "{{#country}}{{name}} is great"
+  data:
+    country:
+      name: "ZooZooLand"
+  error: RuntimeError
 
 - name: deeply nested scope, non-existant
   template: "{{#country}}{{#city}}{{#person}}{{name}}, {{age}}{{/person}}{{/country}}{{/city}}"
@@ -282,7 +260,7 @@
       #         - type: dog
 
 - name: Looping with functions
-  template: "{{#people}}Hi {{upcase(item=\"name\")}}\n{{/people}}"
+  template: "{{#people}}Hi {{upcase item='{{name}}'}}\n{{/people}}"
   result: "Hi JOHN\nHi JANE\n"
   data:
     people:
@@ -291,30 +269,24 @@
 
 # Built in functions
 - name: Simple upcase
-  template: "{{upcase(item=\"howdy\")}}"
+  template: "{{upcase item='howdy'}}"
   result: HOWDY
 
 - name: Upcase with data
-  template: "Hey {{upcase name}}"
+  template: "Hey {{upcase item='{{name}}'}}"
   result: Hey DUDE
   data:
     name: dude
 
-- name: Incorrect number of args is error
-  template: "{{upcase name blah}}"
-  data:
-    name: John Doe
-  error: RuntimeError
-
 - name: Upcase with nested data
-  template: "Hey {{upcase(item=\"{{person.name}}\")}}"
+  template: "Hey {{upcase item='{{person.name}}'}}"
   result: Hey DUDE
   data:
     person:
       name: dude
 
 - name: Map style args
-  template: "{{multiply a=5 b=5}}"
+  template: "{{multiply a='5' b='5'}}"
   result: "25"
   data:
     a: 5

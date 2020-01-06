@@ -1,152 +1,123 @@
 defmodule Snor.Executor do
   alias Snor.{Parser, Utils}
 
-  @spec execute([Parser.template_node()], %{}, module()) :: String.t()
+  @typedoc "The map provided to the template"
+  @type data :: %{optional(any) => any}
+
+  @doc "Convert a list of tokens into a string"
+  @spec execute([Parser.parsed_node()], data, module()) :: String.t()
   def execute(tokens, data, helpers) do
     data = Utils.deep_stringify(data)
 
     tokens
-    |> Enum.reverse()
     |> Enum.reduce(
       {%{data: data, scope: data, stack: [], branches: %{}}, []},
-      &execute_node(helpers, &1, elem(&2, 0), elem(&2, 1))
+      &execute1(helpers, &1, elem(&2, 0), elem(&2, 1))
     )
     |> elem(1)
     |> Enum.reverse()
     |> Enum.join()
   end
 
-  # open negative scope ^
-  #
-  # When this happens, we re-push the current scope to the top of the stack
-  # if the value lookup is absent.
-  # If the value lookup is present, we push a skip scope to the stack
-  #
-  # The close scope operator takes case of the validations
-  defp execute_node(_helpers, %{val: <<94, key::binary>>}, context, results) do
-    %{scope: scope, stack: stack} = context
+  defp execute1(_helpers, %{plaintext: plaintext}, context, results)
+       when is_binary(plaintext),
+       do: {context, [plaintext | results]}
 
-    target =
-      case Utils.deep_get(scope, key, nil) do
-        nil -> scope
-        _ -> %{skip: true}
-      end
-
-    {%{context | scope: target, stack: [{key, scope} | stack]}, results}
+  defp execute1(_helpers, %{interpolation: key}, context, results) do
+    with fallback <- Utils.deep_get(context.data, key, ""),
+         value <- Utils.deep_get(context.scope, key, fallback),
+         do: {context, [value | results]}
   end
 
-  # open scope #
-  defp execute_node(_helpers, %{val: <<35, key::binary>>}, context, results) do
-    %{scope: scope, stack: stack} = context
-    target = Utils.deep_get(scope, key, %{skip: true}) || %{skip: true}
+  defp execute1(helpers, %{function: fn_name, arguments: arguments}, context, results) do
+    arguments =
+      arguments
+      |> Enum.map(fn %{key: k, value: tokens} ->
+        {k, execute(tokens, context.scope, helpers)}
+      end)
+      |> Enum.into(%{})
 
-    case is_list(target) do
-      false ->
-        {%{context | scope: target, stack: [{key, scope} | stack]}, results}
+    {context,
+     [
+       Kernel.apply(helpers, String.to_atom(fn_name), [context.data, arguments])
+       | results
+     ]}
+  end
 
-      true ->
-        result_map = Enum.reduce(target, %{}, fn index, acc -> Map.put(acc, index, []) end)
+  defp execute1(helpers, node = %{with_scope: key}, context, results) do
+    children = node.children
 
-        {%{context | branches: result_map, scope: target, stack: [{key, scope} | stack]}, results}
+    negative = Map.get(node, :negative, false)
+
+    case Utils.deep_get(context.scope, key, Utils.deep_get(context.data, key, "")) do
+      scope when is_list(scope) ->
+        # in a list context, negative means that the list should be empty
+        cond do
+          negative and length(scope) > 0 ->
+            {context, results}
+
+          # else process all the things
+          true ->
+            # if this is a negative scope, we need the loop to execute atleast
+            # once, so shove an empty map in there
+            rendered_children =
+              if(negative, do: [%{}], else: scope)
+              |> Enum.reverse()
+              |> Enum.flat_map(fn scope ->
+                children
+                |> Enum.reduce(
+                  {%{context | data: context.data, scope: scope}, []},
+                  &execute1(helpers, &1, elem(&2, 0), elem(&2, 1))
+                )
+                |> elem(1)
+              end)
+
+            {context, rendered_children ++ results}
+        end
+
+      scope when is_map(scope) ->
+        # in a map context, negative means the map is empty
+        blank_scope = map_size(scope) == 0
+
+        cond do
+          (negative and !blank_scope) or (!negative and blank_scope) ->
+            {context, results}
+
+          true ->
+            rendered_children =
+              children
+              |> Enum.reduce(
+                {%{context | data: context.data, scope: scope}, []},
+                &execute1(helpers, &1, elem(&2, 0), elem(&2, 1))
+              )
+              |> elem(1)
+
+            {context, rendered_children ++ results}
+        end
+
+      scope ->
+        # in any context, negative means object is nil, or false
+        blank_scope = is_nil(scope) or scope == false or scope == ""
+
+        cond do
+          (negative and !blank_scope) or (!negative and blank_scope) ->
+            {context, results}
+
+          true ->
+            rendered_children =
+              children
+              |> Enum.reduce(
+                {%{context | data: context.data, scope: scope}, []},
+                &execute1(helpers, &1, elem(&2, 0), elem(&2, 1))
+              )
+              |> elem(1)
+
+            {context, rendered_children ++ results}
+        end
     end
   end
 
-  # close scope /
-  defp execute_node(
-         _helpers,
-         %{val: <<47, key::binary>>},
-         context = %{stack: [{name, scope} | stack]},
-         results
-       )
-       when name == key do
-    %{branches: branches} = context
-
-    case Enum.empty?(branches) do
-      true ->
-        {%{context | scope: scope, stack: stack}, results}
-
-      false ->
-        all_branches = branches |> Map.values() |> Enum.reduce([], &(&2 ++ &1))
-        {%{context | scope: scope, stack: stack, branches: %{}}, all_branches ++ results}
-    end
-  end
-
-  # close scope /
-  defp execute_node(_helpers, %{val: <<47, key::binary>>}, _, _results) do
-    raise "Trying to close un-opened tag #{key}"
-  end
-
-  defp execute_node(_helpers, _, context = %{scope: %{skip: true}}, results),
-    do: {context, results}
-
-  defp execute_node(_helpers, %{type: :raw, val: val}, context, results) do
-    %{branches: branches} = context
-
-    case Enum.empty?(branches) do
-      true ->
-        {context, [val | results]}
-
-      false ->
-        branches =
-          branches
-          |> Enum.map(fn {scope, results} ->
-            {scope, [val | results]}
-          end)
-          |> Enum.into(%{})
-
-        {%{context | branches: branches}, results}
-    end
-  end
-
-  defp execute_node(_helpers, %{type: :data, val: val}, context, results) do
-    %{branches: branches} = context
-
-    case Enum.empty?(branches) do
-      true ->
-        {context, [Utils.deep_get(context.scope, val, "") | results]}
-
-      _ ->
-        # wow, we are inside a loop construct
-        # let's eagerly execute all the branches of the loop
-
-        branches =
-          branches
-          |> Enum.map(fn {scope, results} ->
-            {scope, [Utils.deep_get(scope, val, "") | results]}
-          end)
-          |> Enum.into(%{})
-
-        {%{context | branches: branches}, results}
-    end
-  end
-
-  defp execute_node(helpers, %{type: :fn, function: fn_name, args: args}, context, results) do
-    %{branches: branches} = context
-
-    case Enum.empty?(branches) do
-      true ->
-        {context,
-         [
-           Kernel.apply(helpers, fn_name, [context.data | args])
-           | results
-         ]}
-
-      _ ->
-        # wow, we are inside a loop construct
-        # let's eagerly execute all the branches of the loop
-
-        branches =
-          branches
-          |> Enum.map(fn {scope, results} ->
-            {scope,
-             [
-               Kernel.apply(helpers, fn_name, [scope | args])
-               | results
-             ]}
-          end)
-          |> Enum.into(%{})
-
-        {%{context | branches: branches}, results}
-    end
+  defp execute1(_helpers, _, context, results) do
+    {context, results}
   end
 end

@@ -35,22 +35,30 @@ defmodule Snor.Utils do
       %{}
       iex> Snor.Utils.deep_stringify(%{a: 4})
       %{"a" => 4}
+      iex> Snor.Utils.deep_stringify(%{a: [%{b: 1}]})
+      %{"a" => [%{"b" => 1}]}
 
   """
   def deep_stringify(map) do
-    case is_map(map) do
-      false ->
-        map
-
+    case is_list(map) do
       true ->
-        map
-        |> Enum.map(fn {key, value} ->
-          case is_atom(key) do
-            false -> {key, deep_stringify(value)}
-            true -> {Atom.to_string(key), deep_stringify(value)}
-          end
-        end)
-        |> Enum.into(%{})
+        Enum.map(map, &deep_stringify/1)
+
+      false ->
+        case is_map(map) do
+          false ->
+            map
+
+          true ->
+            map
+            |> Enum.map(fn {key, value} ->
+              case is_atom(key) do
+                false -> {key, deep_stringify(value)}
+                true -> {Atom.to_string(key), deep_stringify(value)}
+              end
+            end)
+            |> Enum.into(%{})
+        end
     end
   end
 end

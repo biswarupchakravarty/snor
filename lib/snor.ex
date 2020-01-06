@@ -14,6 +14,7 @@ defmodule Snor do
   ## Examples
       iex> Snor.render("Hello {{name}}", %{name: "World"})
       "Hello World"
+
       iex> Snor.render("Hello")
       "Hello"
   """

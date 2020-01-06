@@ -3,4 +3,5 @@ defmodule Snor.EngineTest do
 
   doctest Snor
   doctest Snor.Utils
+  doctest Snor.Parser
 end
