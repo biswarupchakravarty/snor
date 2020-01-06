@@ -12,7 +12,7 @@ by adding `snor` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:snor, "~> 0.1.0"}
+    {:snor, "~> 0.3.0"}
   ]
 end
 ```
