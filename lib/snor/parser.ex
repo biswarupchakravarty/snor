@@ -7,6 +7,7 @@ defmodule Snor.Parser do
   - A plaintext node
   - A function node
   - A block node
+  - An interpolation node
   """
 
   @typedoc """
@@ -36,7 +37,10 @@ defmodule Snor.Parser do
   @type function_node :: %{function: String.t(), arguments: [argument_pair]}
 
   @typedoc "The result of a `parse_*` operation"
-  @type parse_result :: {:error, String.t()} | {:ok, parsed_node, remaining_tokens()}
+  @type parse_result :: {:error, String.t()} | {:ok, parsed_node | any, binary()}
+
+  @typedoc "A parser"
+  @type parser :: function()
 
   @doc ~S"""
   Parse a string into a list of nodes
@@ -53,238 +57,315 @@ defmodule Snor.Parser do
       [%{arguments: [%{key: "item", value: [%{plaintext: "Jane"}]}], function: "upcase"}]
 
       iex> Snor.Parser.parse("{{#person}}{{name}}{{/person}}")
-      [%{children: [%{interpolation: "name"}, %{plaintext: ""}], negative: false, with_scope: "person"}]
+      [%{children: [%{interpolation: "name"}], negative: false, with_scope: "person"}]
   """
-  @spec parse(String.t()) :: [parsed_node]
-  def parse(template) do
-    result =
-      template
-      |> String.graphemes()
-      |> process([], [], nil)
+  @spec parse(binary()) :: [parsed_node()]
+  def parse(input) do
+    parser = nodes()
 
-    case result do
-      {nodes, []} -> nodes
-      {_, unprocessed} -> raise "Unprocessed #{inspect(unprocessed)}"
+    case parser.(input) do
+      {:ok, nodes, <<>>} -> nodes
+      {:ok, _, _} -> raise ArgumentError, "Couldn't parse"
+      {:error, error} -> raise ArgumentError, "Error #{error}"
     end
   end
 
-  @doc "Parse an interpolation/block node"
-  @spec parse_node([token], [parsed_node]) ::
-          {:error, String.t()} | {:ok, parsed_node, remaining_tokens()}
-  def parse_node(tokens, nodes),
-    do: maybe([:interpolation, :block], tokens, nodes)
+  @spec nodes() :: parser()
+  defp nodes,
+    do:
+      any_node()
+      |> many()
+      |> non_zero()
 
-  @doc "Parse a block"
-  @spec parse_block([token], [parsed_node()]) :: parse_result
-  def parse_block(tokens, _nodes) do
-    init = %{negative: false, buffer: [], tokens: tokens}
+  @spec any_node() :: parser()
+  defp any_node,
+    do:
+      [plaintext_node(), interpolation(), block(), function()]
+      |> choice()
+      |> non_zero()
 
-    result =
-      Enum.reduce_while(tokens, init, fn c, acc ->
-        %{buffer: buffer, tokens: [_ | remaining]} = acc
-
-        case c do
-          "^" ->
-            {:cont, %{acc | negative: true, tokens: remaining}}
-
-          "#" ->
-            {:cont, %{acc | tokens: remaining}}
-
-          "}" ->
-            case buffer do
-              ["}" | _] -> {:halt, %{acc | tokens: remaining, buffer: tl(buffer)}}
-              _ -> {:cont, %{acc | tokens: remaining, buffer: [c | buffer]}}
-            end
-
-          _ ->
-            {:cont, %{acc | tokens: remaining, buffer: [c | buffer]}}
-        end
-      end)
-
-    case result.tokens do
-      [] ->
-        {:error, "Could not find closing symbols"} |> IO.inspect()
-
-      _ ->
-        scope = to_binary(result.buffer)
-        closing_scope = %{interpolation: "/#{scope}"}
-
-        {nodes, tokens} = process(result.tokens, [], [], closing_scope)
-
-        {:ok, %{with_scope: scope, children: Enum.reverse(nodes), negative: result.negative},
-         tokens}
+  @spec plaintext_node() :: parser()
+  defp plaintext_node do
+    fn input ->
+      with {:ok, contents, rest} <- plaintext().(input),
+           <<_::utf8, _::binary>> <- contents do
+        {:ok, %{plaintext: contents}, rest}
+      else
+        _ -> {:error, "Was expecting a plaintext node"}
+      end
     end
   end
 
-  @doc "Parse an argument pair"
-  @spec parse_argument([token], [parsed_node()]) :: {:ok, argument_pair(), remaining_tokens()}
-  def parse_argument(tokens, _nodes) do
-    init = %{
-      key: [],
-      key_done: false,
-      value: [],
-      tokens: tokens,
-      opened: false,
-      value_done: false
-    }
-
-    argument =
-      Enum.reduce_while(tokens, init, fn c, acc ->
-        next =
-          cond do
-            acc.value_done -> nil
-            !acc.key_done && c != "=" -> %{acc | key: [c | acc.key]}
-            !acc.key_done && c == "=" -> %{acc | key_done: true}
-            acc.key_done && c == "'" && !acc.opened -> %{acc | opened: true}
-            acc.opened && c != "'" -> %{acc | value: [c | acc.value]}
-            acc.opened && c == "'" -> %{acc | value_done: true}
-            true -> raise "Unknown state #{inspect(acc)}"
-          end
-
-        case next do
-          nil ->
-            {:halt, acc}
-
-          _ ->
-            next = Map.put(next, :tokens, tl(acc.tokens))
-            {:cont, next}
-        end
-      end)
-
-    {nodes, []} = process(Enum.reverse(argument.value), [], [], nil)
-    {:ok, %{key: to_binary(argument.key), value: nodes}, argument.tokens}
-  end
-
-  @doc "Parse an interpolation node"
-  @spec parse_interpolation([token], [parsed_node]) :: parse_result
-  def parse_interpolation(tokens, _nodes) do
-    init = %{done: false, buffer: [], tokens: tokens, error: ""}
-
-    acc =
-      Enum.reduce_while(tokens, init, fn c, acc ->
-        case c do
-          "^" ->
-            {:halt, %{acc | done: false, tokens: tl(acc.tokens)}}
-
-          "#" ->
-            {:halt, %{acc | done: false, tokens: tl(acc.tokens)}}
-
-          " " ->
-            init = %{arguments: [], tokens: acc.tokens}
-
-            %{arguments: arguments, tokens: tokens} =
-              Enum.reduce_while(acc.tokens, init, fn _token, acc ->
-                case match?(["}" | ["}" | _]], acc.tokens) do
-                  true ->
-                    {:halt, %{acc | tokens: acc.tokens |> tl |> tl}}
-
-                  false ->
-                    {:ok, node, tokens} = parse_argument(tl(acc.tokens), [])
-
-                    {:cont, %{acc | arguments: [node | acc.arguments], tokens: tokens}}
-                end
-              end)
-
-            {:halt,
-             %{
-               done: true,
-               func: to_binary(acc.buffer),
-               type: :function,
-               arguments: arguments,
-               tokens: tokens
-             }}
-
-          "}" ->
-            case acc.buffer do
-              ["}" | _] ->
-                {:halt,
-                 %{
-                   done: true,
-                   type: :interpolation,
-                   buffer: tl(acc.buffer),
-                   tokens: tl(acc.tokens)
-                 }}
-
-              _ ->
-                {:cont, %{acc | buffer: [c | acc.buffer], tokens: tl(acc.tokens)}}
-            end
-
-          _ ->
-            {:cont, %{acc | buffer: [c | acc.buffer], tokens: tl(acc.tokens)}}
-        end
-      end)
-
-    case acc.done do
-      false ->
-        {:error, Map.get(acc, :error, "Are you missing }}?")}
-
-      true ->
-        case acc.type do
-          :interpolation -> {:ok, %{interpolation: to_binary(acc.buffer)}, acc.tokens}
-          :function -> {:ok, %{function: acc.func, arguments: acc.arguments}, acc.tokens}
-        end
+  @spec function() :: parser()
+  defp function do
+    fn input ->
+      with {:ok, <<?{, ?{>>, rest} <- nchars(2).(input),
+           {:ok, function_name, rest} <- plaintext_apart_from([?\s]).(rest),
+           {:ok, arguments, rest} <- argument_pairs().(rest),
+           {:ok, <<?}, ?}>>, rest} <- nchars(2).(rest) do
+        {:ok, %{function: function_name, arguments: arguments}, rest}
+      else
+        _ -> {:error, "Expected function"}
+      end
     end
   end
 
-  defp process([], buffer, nodes, needle) do
-    case needle do
-      nil ->
-        case buffer do
-          [] ->
-            {Enum.reverse(nodes), []}
+  @spec argument_pairs() :: parser()
+  defp argument_pairs,
+    do:
+      argument_pair_with_leading_space()
+      |> many
+      |> non_zero()
 
-          _ ->
-            {Enum.reverse([%{plaintext: buffer |> Enum.reverse() |> Enum.join()} | nodes]), []}
-        end
-
-      _ ->
-        raise "Was expecting #{inspect(needle)}"
+  @spec argument_pair_with_leading_space() :: parser()
+  defp argument_pair_with_leading_space do
+    fn input ->
+      with {:ok, ?\s, rest} <- char().(input),
+           {:ok, pair, rest} <- argument_pair().(rest) do
+        {:ok, pair, rest}
+      else
+        _ -> {:error, "Could not parse argument pair with leading space"}
+      end
     end
   end
 
-  defp process(["{" | tokens], ["{" | buffer], nodes, needle) do
-    case parse_node(tokens, nodes) do
-      {:error, error} ->
-        raise inspect(error)
-
-      {:ok, node, tokens} ->
-        case needle == node do
-          true ->
-            {[%{plaintext: to_binary(buffer)} | nodes], tokens}
-
-          false ->
-            case buffer do
-              [] ->
-                process(tokens, [], [node | nodes], needle)
-
-              _ ->
-                p = %{plaintext: to_binary(buffer)}
-                process(tokens, [], [node, p] ++ nodes, needle)
-            end
-        end
+  @spec argument_pair() :: parser()
+  defp argument_pair do
+    fn input ->
+      with {:ok, key, rest} <- plaintext_apart_from([?=]).(input),
+           {:ok, ?=, rest} <- char().(rest),
+           {:ok, value, rest} <- argument_value().(rest) do
+        {:ok, %{key: key, value: value}, rest}
+      else
+        _ ->
+          {:error, "Was expecting an argument pair"}
+      end
     end
   end
 
-  defp process([char | tokens], buffer, nodes, needle) do
-    process(tokens, [char | buffer], nodes, needle)
-  end
-
-  defp maybe(rules, tokens, nodes) when is_list(rules) do
-    result =
-      rules
-      |> Enum.map(&String.to_atom("parse_#{&1}"))
-      |> Enum.reduce_while(nil, fn func, _ ->
-        case Kernel.apply(__MODULE__, func, [tokens, nodes]) do
-          {:error, _} -> {:cont, nil}
-          {:ok, node, tokens} -> {:halt, {node, tokens}}
-        end
-      end)
-
-    case result do
-      nil -> {:error, "No match found"}
-      {node, tokens} -> {:ok, node, tokens}
+  @spec argument_value() :: parser()
+  defp argument_value do
+    fn input ->
+      with {:ok, ?', rest} <- char().(input),
+           {:ok, contents, rest} <- argument_contents().(rest),
+           {:ok, ?', rest} <- char().(rest),
+           {:ok, inner_nodes, <<>>} <- nodes().(contents) do
+        {:ok, inner_nodes, rest}
+      else
+        _ -> {:error, "Expected a quoted argument"}
+      end
     end
   end
 
-  defp to_binary(items) when is_list(items), do: items |> Enum.reverse() |> Enum.join()
+  @spec argument_contents() :: parser()
+  defp argument_contents,
+    do:
+      char()
+      |> satisfy(&(&1 != ?'), "anything but a '")
+      |> many
+      |> non_zero
+      |> map(&to_string/1)
+
+  @spec interpolation() :: parser()
+  defp interpolation do
+    fn input ->
+      with {:ok, <<?{, ?{>>, rest} <- nchars(2).(input),
+           {:ok, tag_name, rest} <- tag_name().(rest),
+           {:ok, <<?}, ?}>>, rest} <- nchars(2).(rest) do
+        {:ok, %{interpolation: tag_name}, rest}
+      else
+        _ ->
+          {:error, "Expected an interpolation"}
+      end
+    end
+  end
+
+  @spec tag_name() :: parser()
+  defp tag_name do
+    char()
+    |> satisfy(&(&1 in ?a..?z || &1 in ?A..?Z || &1 in ?0..?9 || &1 in [?_, ?.]))
+    |> many()
+    |> non_zero()
+    |> map(&to_string/1)
+  end
+
+  @spec nodes_until(any) :: parser()
+  defp nodes_until(needle),
+    do:
+      any_node()
+      |> satisfy(&(&1 != needle), "anything but #{inspect(needle)}")
+      |> many()
+      |> non_zero()
+
+  @spec block() :: parser()
+  defp block do
+    fn input ->
+      with {:ok, %{opening_scope: scope, negative: negative}, rest} <- open_scope().(input),
+           {:ok, contents, rest} <- nodes_until(%{closing_scope: scope}).(rest),
+           {:ok, %{closing_scope: ^scope}, rest} <- close_scope().(rest) do
+        {:ok, %{with_scope: scope, children: contents, negative: negative}, rest}
+      else
+        {:ok, %{closing_scope: scope}, _} ->
+          {:error, "Closed #{scope}, but it was not opened"}
+
+        _ ->
+          {:error, "Was expecting a block"}
+      end
+    end
+  end
+
+  @spec open_scope() :: parser()
+  defp open_scope do
+    fn input ->
+      with {:ok, <<?{, ?{>>, rest} <- nchars(2).(input),
+           {:ok, tag_name, rest} <- plaintext().(rest),
+           {:ok, <<?}, ?}>>, rest} <- nchars(2).(rest) do
+        case tag_name do
+          <<?#, tag::binary>> -> {:ok, %{opening_scope: tag, negative: false}, rest}
+          <<?^, tag::binary>> -> {:ok, %{opening_scope: tag, negative: true}, rest}
+          <<char::utf8, _::binary>> -> {:error, "A block cannot start with [#{char}]"}
+        end
+      else
+        _ -> {:error, "Expected a block"}
+      end
+    end
+  end
+
+  @spec close_scope() :: parser()
+  defp close_scope do
+    fn input ->
+      with {:ok, <<?{, ?{, ?/>>, rest} <- nchars(3).(input),
+           {:ok, tag_name, rest} <- plaintext().(rest),
+           {:ok, <<?}, ?}>>, rest} <- nchars(2).(rest) do
+        {:ok, %{closing_scope: tag_name}, rest}
+      else
+        _ -> {:error, "Expected a block close"}
+      end
+    end
+  end
+
+  @spec map(parser(), fun()) :: parser()
+  defp map(parser, mapper) do
+    fn input ->
+      with {:ok, term, rest} <- parser.(input),
+           do: {:ok, mapper.(term), rest}
+    end
+  end
+
+  @spec plaintext() :: parser()
+  defp plaintext,
+    do:
+      plaintext_chars()
+      |> map(&to_string/1)
+
+  @spec plaintext_apart_from([byte()]) :: parser()
+  defp plaintext_apart_from(chars),
+    do:
+      plaintext_char()
+      |> satisfy(&(&1 not in chars), "anything but #{chars}")
+      |> many()
+      |> non_zero()
+      |> map(&to_string/1)
+
+  @spec non_zero(parser()) :: parser()
+  defp non_zero(parser) do
+    fn input ->
+      with {:ok, [], _rest} <- parser.(input),
+           do: {:error, "Wasn't expecting nothing"}
+    end
+  end
+
+  @spec choice([parser()]) :: parser()
+  defp choice(parsers) do
+    fn input ->
+      case parsers do
+        [] ->
+          {:error, "No way to parse - #{input}"}
+
+        [h | t] ->
+          with {:error, _} <- h.(input),
+               do: choice(t).(input)
+      end
+    end
+  end
+
+  @spec many(parser()) :: parser()
+  defp many(parser) do
+    fn input ->
+      case parser.(input) do
+        {:error, _error} ->
+          {:ok, [], input}
+
+        {:ok, term, rest} ->
+          with {:ok, other_terms, rest} <- many(parser).(rest),
+               do: {:ok, [term | other_terms], rest}
+      end
+    end
+  end
+
+  @spec satisfy(parser(), fun(), String.t()) :: parser()
+  defp satisfy(parser, predicate, expectation \\ "unexpected input") do
+    fn input ->
+      with {:ok, term, rest} <- parser.(input) do
+        if predicate.(term),
+          do: {:ok, term, rest},
+          else: {:error, "Expected #{expectation} before #{rest}"}
+      end
+    end
+  end
+
+  @spec consume_plaintext(binary, [byte], binary) :: {:ok, [byte], binary}
+  defp consume_plaintext(<<>>, buf, rest), do: {:ok, Enum.reverse(buf), rest}
+
+  defp consume_plaintext(<<?}::utf8, ?}::utf8, _::binary>>, buf, rest),
+    do: {:ok, Enum.reverse(buf), rest}
+
+  defp consume_plaintext(<<?{::utf8, ?{::utf8, _::binary>>, buf, rest),
+    do: {:ok, Enum.reverse(buf), rest}
+
+  defp consume_plaintext(<<char::utf8, rest::binary>>, buf, _),
+    do: consume_plaintext(rest, [char | buf], rest)
+
+  @spec plaintext_chars() :: parser()
+  defp plaintext_chars,
+    do: &consume_plaintext(&1, [], &1)
+
+  @spec plaintext_char() :: parser()
+  defp plaintext_char do
+    fn input ->
+      case input do
+        <<>> ->
+          {:error, "Unexpected end of input"}
+
+        <<?}::utf8, ?}::utf8, _::binary>> ->
+          {:error, "reached closing braces"}
+
+        <<?{::utf8, ?{::utf8, _::binary>> ->
+          {:error, "reached opening braces"}
+
+        <<char::utf8, rest::binary>> ->
+          {:ok, char, rest}
+      end
+    end
+  end
+
+  @spec char() :: parser()
+  defp char do
+    fn input ->
+      case input do
+        "" -> {:error, "Unexpected end of input"}
+        <<char::utf8, rest::binary>> -> {:ok, char, rest}
+      end
+    end
+  end
+
+  @spec nchars(non_neg_integer()) :: parser()
+  defp nchars(n) do
+    fn input ->
+      case input do
+        <<chars::binary-size(n), rest::binary>> -> {:ok, chars, rest}
+        _ -> {:error, "Unexpected end of input"}
+      end
+    end
+  end
 end

@@ -39,26 +39,19 @@ defmodule Snor.Utils do
       %{"a" => [%{"b" => 1}]}
 
   """
-  def deep_stringify(map) do
-    case is_list(map) do
-      true ->
-        Enum.map(map, &deep_stringify/1)
-
-      false ->
-        case is_map(map) do
-          false ->
-            map
-
-          true ->
-            map
-            |> Enum.map(fn {key, value} ->
-              case is_atom(key) do
-                false -> {key, deep_stringify(value)}
-                true -> {Atom.to_string(key), deep_stringify(value)}
-              end
-            end)
-            |> Enum.into(%{})
-        end
-    end
+  @spec deep_stringify(%{optional(any) => any}) :: %{optional(String.t()) => any}
+  def deep_stringify(map) when is_map(map) do
+    Enum.map(map, fn {key, value} ->
+      case is_atom(key) do
+        false -> {key, deep_stringify(value)}
+        true -> {Atom.to_string(key), deep_stringify(value)}
+      end
+    end)
+    |> Enum.into(%{})
   end
+
+  def deep_stringify(list) when is_list(list),
+    do: Enum.map(list, &deep_stringify/1)
+
+  def deep_stringify(x), do: x
 end

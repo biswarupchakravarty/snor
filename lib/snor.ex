@@ -4,7 +4,7 @@ defmodule Snor do
 
   Snor also has support for executing functions.
   """
-  alias Snor.{Parser, Executor}
+  alias Snor.{Executor, Parser}
 
   @doc ~S"""
   Render a given template to a string. The second parameter is the map that

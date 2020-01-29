@@ -3,13 +3,13 @@ defmodule Snor.PerformanceTest do
   use ExUnit.Case
 
   defp x(str) do
-    Snor.NewParser.parse(str)
+    Snor.Parser.parse(str)
   end
 
   setup do
     repeater = "Hello {{name}}, meet {{another}}!
     {{#nested}}{{value}}{{/nested}} \n
-     is allowed {{upcase item='YO'}} {{upcase item='{{name}}'}}."
+     is allowed {{#a}} {{upcase item='YO'}} {{upcase item='{{name}}'}} {{/a}}."
 
     str = 1..100 |> Enum.map(fn _ -> repeater end) |> Enum.join("")
     num_bytes = byte_size(str)

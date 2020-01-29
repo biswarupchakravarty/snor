@@ -9,11 +9,6 @@
 
 # Variables
 
-- name: Blank interpolation
-  template: "Hello World {{}}"
-  data:
-  result: "Hello World "
-
 - name: Simple variable
   template: Hello {{var}}
   data:
@@ -130,7 +125,7 @@
 
 - name: Coming out of invalid scope is error
   template: "{{#person}}{{name}}{{/people}}"
-  error: RuntimeError
+  error: ArgumentError
 
 - name: Deeply nested scope
   template: "{{#country}}{{#city}}{{#street}}{{name}}{{/street}}{{/city}}{{/country}}"
@@ -143,7 +138,7 @@
 
 - name: Deeply nested scope, incorrect closing is error
   template: "{{#country}}{{#city}}{{#street}}{{name}}{{/city}}{{/street}}{{/country}}"
-  error: RuntimeError
+  error: ArgumentError
   data:
     country:
       city:
@@ -155,12 +150,12 @@
   data:
     country:
       name: "ZooZooLand"
-  error: RuntimeError
+  error: ArgumentError
 
 - name: deeply nested scope, non-existant
   template: "{{#country}}{{#city}}{{#person}}{{name}}, {{age}}{{/person}}{{/country}}{{/city}}"
   data:
-  error: RuntimeError
+  error: ArgumentError
 
 - name: Scoping with dot syntax
   template: "{{#person.name}}{{first}}{{/person.name}}"

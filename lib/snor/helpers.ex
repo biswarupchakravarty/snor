@@ -1,4 +1,10 @@
 defmodule Snor.Helpers do
+  @moduledoc """
+  Basic set of helpers.
+
+  This out of the box helpers module is fairly useless, and is expected that
+  the user injects their own helpers.
+  """
   require Logger
   alias Snor.Utils
 
