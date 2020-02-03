@@ -51,13 +51,16 @@ defmodule Snor.Parser do
       [%{plaintext: "Hello"}]
 
       iex> Snor.Parser.parse("{{name}}")
-      [%{interpolation: "name"}]
+      [%{interpolation: "name", escape: true}]
+
+      iex> Snor.Parser.parse("{{{name}}}")
+      [%{interpolation: "name", escape: false}]
 
       iex> Snor.Parser.parse("{{upcase item='Jane'}}")
       [%{arguments: [%{key: "item", value: [%{plaintext: "Jane"}]}], function: "upcase"}]
 
       iex> Snor.Parser.parse("{{#person}}{{name}}{{/person}}")
-      [%{children: [%{interpolation: "name"}], negative: false, with_scope: "person"}]
+      [%{children: [%{interpolation: "name", escape: true}], negative: false, with_scope: "person"}]
   """
   @spec parse(binary()) :: [parsed_node()]
   def parse(input) do
@@ -80,7 +83,13 @@ defmodule Snor.Parser do
   @spec any_node() :: parser()
   defp any_node,
     do:
-      [plaintext_node(), interpolation(), block(), function()]
+      [
+        interpolation(),
+        block(),
+        function(),
+        comment_node(),
+        plaintext_node()
+      ]
       |> choice()
       |> non_zero()
 
@@ -166,19 +175,62 @@ defmodule Snor.Parser do
       |> non_zero
       |> map(&to_string/1)
 
+  @spec comment_node() :: parser()
+  defp comment_node do
+    fn input ->
+      with {:ok, <<?{, ?{, ?!>>, rest} <- nchars(3).(input),
+           {:ok, _, rest} <- plaintext_chars().(rest),
+           {:ok, <<?}, ?}>>, rest} <- nchars(2).(rest) do
+        {:ok, %{plaintext: ""}, rest}
+      else
+        _ ->
+          {:error, "Weird comment"}
+      end
+    end
+  end
+
   @spec interpolation() :: parser()
   defp interpolation do
     fn input ->
-      with {:ok, <<?{, ?{>>, rest} <- nchars(2).(input),
+      with {:ok, %{escape: e, type: type}, rest} <- opening_braces().(input),
+           {:ok, _, rest} <- whitespaces().(rest),
            {:ok, tag_name, rest} <- tag_name().(rest),
-           {:ok, <<?}, ?}>>, rest} <- nchars(2).(rest) do
-        {:ok, %{interpolation: tag_name}, rest}
+           {:ok, _, rest} <- whitespaces().(rest),
+           {:ok, %{type: ^type}, rest} <- closing_braces().(rest) do
+        {:ok, %{interpolation: tag_name, escape: e}, rest}
       else
         _ ->
           {:error, "Expected an interpolation"}
       end
     end
   end
+
+  @spec opening_braces :: parser
+  defp opening_braces do
+    fn input ->
+      case input do
+        <<?{, ?{, ?{, rest::binary>> -> {:ok, %{escape: false, type: :triple}, rest}
+        <<?{, ?{, ?&, rest::binary>> -> {:ok, %{escape: false, type: :double}, rest}
+        <<?{, ?{, rest::binary>> -> {:ok, %{escape: true, type: :double}, rest}
+        _ -> {:error, "Opening braces expected"}
+      end
+    end
+  end
+
+  @spec closing_braces :: parser
+  defp closing_braces do
+    fn input ->
+      case input do
+        <<?}, ?}, ?}, rest::binary>> -> {:ok, %{type: :triple}, rest}
+        <<?}, ?}, rest::binary>> -> {:ok, %{type: :double}, rest}
+        _ -> {:error, "Opening braces expected"}
+      end
+    end
+  end
+
+  @spec whitespaces :: parser
+  defp whitespaces,
+    do: char() |> satisfy(&(&1 == ?\s)) |> many
 
   @spec tag_name() :: parser()
   defp tag_name do
@@ -200,7 +252,8 @@ defmodule Snor.Parser do
   @spec block() :: parser()
   defp block do
     fn input ->
-      with {:ok, %{opening_scope: scope, negative: negative}, rest} <- open_scope().(input),
+      with {:ok, %{opening_scope: scope, negative: negative}, rest} <-
+             open_scope().(input),
            {:ok, contents, rest} <- nodes_until(%{closing_scope: scope}).(rest),
            {:ok, %{closing_scope: ^scope}, rest} <- close_scope().(rest) do
         {:ok, %{with_scope: scope, children: contents, negative: negative}, rest}
@@ -214,17 +267,27 @@ defmodule Snor.Parser do
     end
   end
 
+  @spec block_type_specifier :: parser
+  defp block_type_specifier do
+    fn input ->
+      case input do
+        <<?#, rest::binary>> -> {:ok, :positive, rest}
+        <<?^, rest::binary>> -> {:ok, :negative, rest}
+        <<c::utf8, _::binary>> -> {:error, "A block cannot start with #{c}"}
+      end
+    end
+  end
+
   @spec open_scope() :: parser()
   defp open_scope do
     fn input ->
       with {:ok, <<?{, ?{>>, rest} <- nchars(2).(input),
+           {:ok, block_type, rest} <- block_type_specifier().(rest),
+           {:ok, _, rest} <- whitespaces().(rest),
            {:ok, tag_name, rest} <- plaintext().(rest),
+           {:ok, _, rest} <- whitespaces().(rest),
            {:ok, <<?}, ?}>>, rest} <- nchars(2).(rest) do
-        case tag_name do
-          <<?#, tag::binary>> -> {:ok, %{opening_scope: tag, negative: false}, rest}
-          <<?^, tag::binary>> -> {:ok, %{opening_scope: tag, negative: true}, rest}
-          <<char::utf8, _::binary>> -> {:error, "A block cannot start with [#{char}]"}
-        end
+        {:ok, %{opening_scope: tag_name, negative: block_type == :negative}, rest}
       else
         _ -> {:error, "Expected a block"}
       end
@@ -235,7 +298,9 @@ defmodule Snor.Parser do
   defp close_scope do
     fn input ->
       with {:ok, <<?{, ?{, ?/>>, rest} <- nchars(3).(input),
+           {:ok, _, rest} <- whitespaces().(rest),
            {:ok, tag_name, rest} <- plaintext().(rest),
+           {:ok, _, rest} <- whitespaces().(rest),
            {:ok, <<?}, ?}>>, rest} <- nchars(2).(rest) do
         {:ok, %{closing_scope: tag_name}, rest}
       else
@@ -345,6 +410,26 @@ defmodule Snor.Parser do
 
         <<char::utf8, rest::binary>> ->
           {:ok, char, rest}
+      end
+    end
+  end
+
+  @spec maybe(parser) :: parser
+  defp maybe(parser) do
+    fn input ->
+      case parser.(input) do
+        {:ok, term, rest} -> {:ok, term, rest}
+        _ -> {:ok, nil, input}
+      end
+    end
+  end
+
+  @spec char(char()) :: parser
+  defp char(c) do
+    fn input ->
+      case input do
+        <<^c::utf8, rest::binary>> -> {:ok, c, rest}
+        _ -> {:error, "Was expecting #{c}"}
       end
     end
   end

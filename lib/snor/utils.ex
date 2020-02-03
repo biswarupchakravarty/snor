@@ -18,13 +18,15 @@ defmodule Snor.Utils do
       "NOT_FOUND"
 
   """
-  @spec deep_get(map(), String.t(), any()) :: any()
-  def deep_get(data, path, default) do
+  @spec deep_get(any, String.t(), any()) :: any()
+  def deep_get(data, path, default) when is_map(data) do
     case String.split(path, <<46>>) do
       [key] -> Map.get(data, key, default)
       keys -> get_in(data, keys) || default
     end
   end
+
+  def deep_get(_, _, default), do: default
 
   @doc """
   Given a map, stringify all the keys

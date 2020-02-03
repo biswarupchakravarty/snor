@@ -14,7 +14,7 @@ defmodule Snor.Executor do
 
     tokens
     |> Enum.reduce(
-      {%{data: data, scope: data, stack: [], branches: %{}}, []},
+      {%{data: data, scope: data, stack: [data], branches: %{}}, []},
       &execute(helpers, &1, elem(&2, 0), elem(&2, 1))
     )
     |> elem(1)
@@ -22,14 +22,67 @@ defmodule Snor.Executor do
     |> Enum.join()
   end
 
+  @spec deep_get(any, [binary]) :: any
+  defp deep_get(data, []), do: data
+
+  defp deep_get(data, [key | rest]) do
+    case Map.get(data, key, nil) do
+      nil -> ""
+      x -> deep_get(x, rest)
+    end
+  end
+
+  @spec maybe_escape(any, boolean) :: any
+  defp maybe_escape(str, false),
+    do: str
+
+  defp maybe_escape(str, true) when is_binary(str), do: escape(str, [])
+  defp maybe_escape(x, _), do: x
+
+  defp escape(<<>>, chars),
+    do: chars |> Enum.reverse() |> to_string
+
+  defp escape(<<?&, rest::binary>>, chars),
+    do: escape(rest, [?;, ?p, ?m, ?a, ?& | chars])
+
+  defp escape(<<?", rest::binary>>, chars),
+    do: escape(rest, [?;, ?t, ?o, ?u, ?q, ?& | chars])
+
+  defp escape(<<?<, rest::binary>>, chars),
+    do: escape(rest, [?;, ?t, ?l, ?& | chars])
+
+  defp escape(<<?>, rest::binary>>, chars),
+    do: escape(rest, [?;, ?t, ?g, ?& | chars])
+
+  defp escape(<<c::utf8, rest::binary>>, chars),
+    do: escape(rest, [c | chars])
+
   defp execute(_helpers, %{plaintext: plaintext}, context, results)
        when is_binary(plaintext),
        do: {context, [plaintext | results]}
 
-  defp execute(_helpers, %{interpolation: key}, context, results) do
-    with fallback <- Utils.deep_get(context.data, key, ""),
-         value <- Utils.deep_get(context.scope, key, fallback),
-         do: {context, [value | results]}
+  defp execute(_helpers, %{interpolation: key, escape: escape}, context, results) do
+    case key do
+      "." ->
+        {context, [maybe_escape(context.scope, escape) | results]}
+
+      _ ->
+        segments = [segment | _] = String.split(key, ".")
+
+        value =
+          case Map.get(context.scope, segment, nil) do
+            nil ->
+              deep_get(context.data, segments)
+
+            value when is_map(value) ->
+              deep_get(value, tl(segments))
+
+            value ->
+              value
+          end
+
+        {context, [maybe_escape(value, escape) | results]}
+    end
   end
 
   defp execute(helpers, %{function: fn_name, arguments: arguments}, context, results) do
@@ -49,8 +102,14 @@ defmodule Snor.Executor do
 
   defp execute(helpers, node = %{with_scope: key}, context, results) do
     scope =
-      context.scope
-      |> Utils.deep_get(key, Utils.deep_get(context.data, key, ""))
+      case key do
+        "." ->
+          context.scope
+
+        _ ->
+          context.scope
+          |> Utils.deep_get(key, Utils.deep_get(context.data, key, ""))
+      end
 
     execute_block(helpers, node, scope, context, results)
   end
