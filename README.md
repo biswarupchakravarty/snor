@@ -2,9 +2,7 @@
 
 [![Build Status](https://travis-ci.com/biswarupchakravarty/snor.svg?branch=master)](https://travis-ci.com/biswarupchakravarty/snor)
 
-Snor is a fast and simple implementation of Mustache style templating for Elixir.
-
-This uses the parser combinator approach.
+Parser-Combinator based Mustache templates in Elixir!
 
 **TODO: Add more description**
 
