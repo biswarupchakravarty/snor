@@ -20,6 +20,7 @@ defmodule Snor.BencheeTest do
     {:ok, payloads: payloads}
   end
 
+  @tag :pending
   test "parsing", context do
     context.payloads
     |> Enum.map(fn {test, contents} ->

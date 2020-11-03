@@ -9,27 +9,15 @@ defmodule Snor.Parser do
     %{interpolation: String.split(key, "."), raw: true}
   end
 
-  # defp make_token({:plaintext, contents}), do: %{plaintext: contents}
-
   defp make_token({:block, [[type, name] | tokens]}) do
     [^name | tokens] = Enum.reverse(tokens)
-
-    if type in ~w(# ^) do
-      %{block: name, negative: type == "^", tokens: Enum.reverse(tokens)}
-    else
-      raise "Unsupported block type"
-    end
+    %{block: name, negative: is_negative?(type), tokens: Enum.reverse(tokens)}
   end
 
-  defp make_token({:function, data}) do
-    case data do
-      [name] ->
-        %{function: name}
-
-      [name | arguments] ->
-        Enum.reduce(arguments, &Map.merge/2)
-        |> Map.put(:function, name)
-    end
+  defp make_token({:function, [name | arguments]}) do
+    arguments
+    |> Enum.reduce(&Map.merge/2)
+    |> Map.put(:function, name)
   end
 
   defp make_token({:argument, [key, value]}) do
@@ -38,67 +26,44 @@ defmodule Snor.Parser do
     end
   end
 
-  defp check(<<?{, ?{, _::binary>>, c, _, _), do: {:halt, c}
-  defp check(<<?{, _::binary>>, c, _, _), do: {:halt, c}
-  defp check(_, c, _, _), do: {:cont, c}
+  defp is_negative?(?^), do: true
+  defp is_negative?(?#), do: false
 
   # parsec:Snor.Parser
   import NimbleParsec
 
   open_brackets = string("{{")
-  open_brackets_raw = string("{{{")
   close_brackets = string("}}")
-  close_brackets_raw = string("}}}")
 
   plaintext =
     ascii_string([not: ?{], min: 1)
     |> map({:make_token, []})
 
-  whitespace = ascii_string([?\s], min: 0)
+  whitespace = ascii_string([?\s], min: 1)
 
   valid_identifier = ascii_string([?a..?z, ?A..?Z, ?0..?9, ?_, ?.], min: 1)
 
-  identifier_with_whitespace =
-    ignore(whitespace)
-    |> concat(valid_identifier)
-    |> ignore(whitespace)
+  make_tag = fn open_tag, close_tag, contents ->
+    open_tag
+    |> ignore(optional(whitespace))
+    |> concat(contents)
+    |> ignore(optional(whitespace))
+    |> concat(close_tag)
+  end
 
-  basic_interpolation =
-    ignore(open_brackets)
-    |> concat(identifier_with_whitespace)
-    |> ignore(close_brackets)
-    |> unwrap_and_tag(:interpolation)
+  make_interpolation = fn open_tag, close_tag, contents, type ->
+    make_tag.(ignore(string(open_tag)), ignore(string(close_tag)), contents)
+    |> unwrap_and_tag(type)
     |> map({:make_token, []})
-
-  ampersand_interpolation =
-    ignore(open_brackets)
-    |> concat(ignore(optional(string("&"))))
-    |> concat(identifier_with_whitespace)
-    |> ignore(close_brackets)
-    |> unwrap_and_tag(:interpolation_raw)
-    |> map({:make_token, []})
-
-  triple_mustache_interpolation =
-    ignore(open_brackets_raw)
-    |> concat(identifier_with_whitespace)
-    |> ignore(close_brackets_raw)
-    |> unwrap_and_tag(:interpolation_raw)
-    |> map({:make_token, []})
-
-  interpolation_current_element =
-    ignore(open_brackets)
-    |> ignore(whitespace)
-    |> ascii_char([?.])
-    |> ignore(whitespace)
-    |> replace(:current_element)
-    |> ignore(close_brackets)
+  end
 
   interpolation =
     choice([
-      interpolation_current_element,
-      basic_interpolation,
-      triple_mustache_interpolation,
-      ampersand_interpolation
+      make_interpolation.("{{", "}}", ignore(string(".")), :current_element)
+      |> replace(:current_element),
+      make_interpolation.("{{", "}}", valid_identifier, :interpolation),
+      make_interpolation.("{{{", "}}}", valid_identifier, :interpolation_raw),
+      make_interpolation.("{{&", "}}", valid_identifier, :interpolation_raw)
     ])
 
   comment =
@@ -106,17 +71,14 @@ defmodule Snor.Parser do
     |> eventually(string("}}"))
     |> replace(:comment)
 
-  close_block =
-    ignore(open_brackets)
-    |> ignore(string("/"))
-    |> concat(identifier_with_whitespace)
-    |> ignore(close_brackets)
+  close_block = make_tag.(ignore(string("{{/")), ignore(string("}}")), valid_identifier)
 
   open_block =
-    ignore(open_brackets)
-    |> choice([string("#"), string("^")])
-    |> concat(identifier_with_whitespace)
-    |> ignore(close_brackets)
+    make_tag.(
+      ignore(string("{{")) |> ascii_char([?#, ?^]),
+      ignore(string("}}")),
+      valid_identifier
+    )
     |> wrap
 
   block =
