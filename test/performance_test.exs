@@ -3,7 +3,7 @@ defmodule Snor.PerformanceTest do
   use ExUnit.Case
 
   defp x(str) do
-    Snor.Parser.parse(str)
+    Snor.Parser.parse_binary(str)
   end
 
   setup do
@@ -13,10 +13,9 @@ defmodule Snor.PerformanceTest do
 
     str = 1..100 |> Enum.map(fn _ -> repeater end) |> Enum.join("")
     num_bytes = byte_size(str)
-    %{str: str, num_bytes: num_bytes, times: 50}
+    %{str: str, num_bytes: num_bytes, times: 10}
   end
 
-  @tag :pending
   test "Parsing a large string", context do
     total_time =
       1..context[:times]
@@ -38,17 +37,17 @@ defmodule Snor.PerformanceTest do
 
   @tag :pending
   test "Executing a large parse tree", context do
-    parse_tree = Snor.NewParser.parse(context.str)
+    {:ok, parse_tree, "", %{}, _, _} = Snor.Parser.parse_binary(context.str)
     num_nodes = length(parse_tree)
 
     data = %{"name" => "Biswarup", "another" => "", "nested" => %{"value" => ""}}
 
-    num_bytes = byte_size(Snor.NewExecutor.execute(parse_tree, data, Snor.Helpers))
+    num_bytes = byte_size(Snor.Executor.execute(parse_tree, data))
 
     total_time =
       1..context[:times]
       |> Enum.map(fn _index ->
-        {time, _} = :timer.tc(fn -> Snor.NewExecutor.execute(parse_tree, data, Snor.Helpers) end)
+        {time, _} = :timer.tc(fn -> Snor.Executor.execute(parse_tree, data) end)
 
         time
       end)

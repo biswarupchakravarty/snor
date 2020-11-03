@@ -43,13 +43,13 @@
   template: "Hello {{ {{age}}"
   data:
     age: 123
-  error: ArgumentError
+  error: MatchError
 
 - name: Weird chars
   template: "Hello {{ {{ {{age}}"
   data:
     age: 123
-  error: ArgumentError
+  error: MatchError
 
 - name: Simple tag
   template: "{{f}}"
@@ -125,7 +125,7 @@
 
 - name: Coming out of invalid scope is error
   template: "{{#person}}{{name}}{{/people}}"
-  error: ArgumentError
+  error: MatchError
 
 - name: Deeply nested scope
   template: "{{#country}}{{#city}}{{#street}}{{name}}{{/street}}{{/city}}{{/country}}"
@@ -138,7 +138,7 @@
 
 - name: Deeply nested scope, incorrect closing is error
   template: "{{#country}}{{#city}}{{#street}}{{name}}{{/city}}{{/street}}{{/country}}"
-  error: ArgumentError
+  error: MatchError
   data:
     country:
       city:
@@ -150,12 +150,12 @@
   data:
     country:
       name: "ZooZooLand"
-  error: ArgumentError
+  error: MatchError
 
 - name: deeply nested scope, non-existant
   template: "{{#country}}{{#city}}{{#person}}{{name}}, {{age}}{{/person}}{{/country}}{{/city}}"
   data:
-  error: ArgumentError
+  error: MatchError
 
 - name: Scoping with dot syntax
   template: "{{#person.name}}{{first}}{{/person.name}}"

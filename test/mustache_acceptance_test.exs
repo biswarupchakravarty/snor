@@ -31,7 +31,7 @@ defmodule Snor.MustacheAcceptanceTest do
         do: :pending, else: :acceptance
       @tag @tag_type
       test @name do
-        actual_result = Snor.render(@template, @data)
+        actual_result = Snor.process(@template, @data)
 
         assert actual_result == @expected_result
       end

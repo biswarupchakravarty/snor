@@ -12,16 +12,29 @@ defmodule Snor do
   module to use for looking up the helper functions.
 
   ## Examples
-      iex> Snor.render("Hello {{name}}", %{name: "World"})
+      iex> Snor.process("Hello {{name}}", %{name: "World"})
       "Hello World"
 
-      iex> Snor.render("Hello")
+      iex> Snor.process("Hello")
       "Hello"
   """
-  @spec render(String.t(), map(), module()) :: String.t()
-  def render(string, data \\ %{}, helpers \\ Snor.Helpers) do
-    string
-    |> Parser.parse()
-    |> Executor.execute(data, helpers)
+  @spec process(String.t(), map(), module() | nil) :: String.t()
+  def process(input, data \\ %{}, _helpers \\ nil) do
+    {:ok, tokens, "", %{}, _, _} = Parser.parse_binary(input)
+    Executor.execute(tokens, stringify(data))
   end
+
+  defp stringify(map) when is_map(map) do
+    map
+    |> Enum.map(fn {k, v} ->
+      case k do
+        atom when is_atom(atom) -> {Atom.to_string(k), stringify(v)}
+        s when is_binary(s) -> {k, stringify(v)}
+        _ -> raise "Only atoms and strings are allowed values in data!"
+      end
+    end)
+    |> Enum.into(%{})
+  end
+
+  defp stringify(x), do: x
 end
