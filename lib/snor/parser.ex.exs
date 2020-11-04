@@ -26,6 +26,8 @@ defmodule Snor.Parser do
     end
   end
 
+  defp make_token(:current_element), do: :current_element
+
   defp is_negative?(?^), do: true
   defp is_negative?(?#), do: false
 
@@ -51,20 +53,18 @@ defmodule Snor.Parser do
     |> concat(close_tag)
   end
 
-  make_interpolation = fn open_tag, close_tag, contents, type ->
+  make_interpolation = fn open_tag, close_tag, contents ->
     make_tag.(ignore(string(open_tag)), ignore(string(close_tag)), contents)
-    |> unwrap_and_tag(type)
-    |> map({:make_token, []})
   end
 
   interpolation =
     choice([
-      make_interpolation.("{{", "}}", ignore(string(".")), :current_element)
-      |> replace(:current_element),
-      make_interpolation.("{{", "}}", valid_identifier, :interpolation),
-      make_interpolation.("{{{", "}}}", valid_identifier, :interpolation_raw),
-      make_interpolation.("{{&", "}}", valid_identifier, :interpolation_raw)
+      make_interpolation.("{{", "}}", ignore(string("."))) |> replace(:current_element),
+      make_interpolation.("{{", "}}", valid_identifier) |> unwrap_and_tag(:interpolation),
+      make_interpolation.("{{{", "}}}", valid_identifier) |> unwrap_and_tag(:interpolation_raw),
+      make_interpolation.("{{&", "}}", valid_identifier) |> unwrap_and_tag(:interpolation_raw)
     ])
+    |> map({:make_token, []})
 
   comment =
     string("{{!")
