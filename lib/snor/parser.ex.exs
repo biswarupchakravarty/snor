@@ -1,6 +1,4 @@
 defmodule Snor.Parser do
-  defp make_token(plaintext) when is_binary(plaintext), do: %{plaintext: plaintext}
-
   defp make_token({:interpolation, key}) do
     %{interpolation: String.split(key, "."), raw: false}
   end
@@ -28,6 +26,9 @@ defmodule Snor.Parser do
 
   defp make_token(:current_element), do: :current_element
 
+  defp make_token(plaintexts) when is_list(plaintexts),
+    do: %{plaintext: List.to_string(plaintexts)}
+
   defp is_negative?(?^), do: true
   defp is_negative?(?#), do: false
 
@@ -38,8 +39,9 @@ defmodule Snor.Parser do
   close_brackets = string("}}")
 
   plaintext =
-    ascii_string([not: ?{], min: 1)
-    |> map({:make_token, []})
+    choice([utf8_char([?{]) |> choice([eos(), utf8_char(not: ?{)]), utf8_char(not: ?{)])
+    |> times(min: 1)
+    |> reduce({:make_token, []})
 
   whitespace = ascii_string([?\s], min: 1)
 
@@ -64,11 +66,13 @@ defmodule Snor.Parser do
       make_interpolation.("{{{", "}}}", valid_identifier) |> unwrap_and_tag(:interpolation_raw),
       make_interpolation.("{{&", "}}", valid_identifier) |> unwrap_and_tag(:interpolation_raw)
     ])
+    |> label("Interpolation")
     |> map({:make_token, []})
 
   comment =
     string("{{!")
     |> eventually(string("}}"))
+    |> label("Comment")
     |> replace(:comment)
 
   close_block = make_tag.(ignore(string("{{/")), ignore(string("}}")), valid_identifier)
@@ -86,6 +90,7 @@ defmodule Snor.Parser do
     |> concat(lookahead_not(string("{{/")) |> parsec(:parse_binary))
     |> concat(close_block)
     |> tag(:block)
+    |> label("Block")
     |> map({:make_token, []})
 
   argument_pair =
@@ -108,6 +113,7 @@ defmodule Snor.Parser do
     |> times(argument_pair, min: 1)
     |> ignore(close_brackets)
     |> tag(:function)
+    |> label("Function Invocation")
     |> map({:make_token, []})
 
   defparsec(

@@ -1,5 +1,5 @@
 defmodule Snor.ParserTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   doctest Snor.Parser
   alias Snor.Parser
@@ -37,7 +37,7 @@ defmodule Snor.ParserTest do
     end
 
     test "plaintext with braces" do
-      {:ok, tokens, "", _, _} = Parser.parse_binary("{world}")
+      {:ok, tokens, "", _, _, _} = Parser.parse_binary("{world}")
       assert tokens == [%{plaintext: "{world}"}]
     end
 
@@ -120,10 +120,25 @@ defmodule Snor.ParserTest do
   end
 
   describe "comments" do
-    test "ignores tokens" do
-      {:ok, tokens, "", %{}, _, _} = Parser.parse_binary("Hello {{!function_name name='a'}}")
+    test "simple comment" do
+      {:ok, tokens, "", %{}, _, _} = Parser.parse_binary("Hello {{!this is a comment}}")
       assert tokens == [%{plaintext: "Hello "}, :comment]
     end
+    test "ignores tokens" do
+      {:ok, tokens, "", %{}, _, _} = Parser.parse_binary("Hello World{{!function_name name='a'}}")
+      assert tokens == [%{plaintext: "Hello World"}, :comment]
+    end
+  end
+
+  describe "single brace" do
+    @strings ["Hello {world}", "Hello World{", "Hello {World", "{Hello World}", "Hello }world}", "Hello World}", "Hello }World", "}Hello World}"]
+    Enum.map(@strings, fn string ->
+      @string string
+      test "when string is #{@string}" do
+        {:ok, tokens, "", %{}, _, _} = Parser.parse_binary(@string)
+      assert tokens == [%{plaintext: @string}]
+      end
+    end)
   end
 
   describe "functions" do
