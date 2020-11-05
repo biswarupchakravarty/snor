@@ -1,5 +1,5 @@
 # Generated from lib/snor/parser.ex.exs, do not edit.
-# Generated at 2020-11-05 09:21:21Z.
+# Generated at 2020-11-05 11:53:26Z.
 
 defmodule Snor.Parser do
   defp make_token({:interpolation, key}) do

@@ -41,7 +41,7 @@ defmodule Snor.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:nimble_parsec, "~> 1.1"},
+      {:nimble_parsec, "~> 1.1", only: [:dev, :test]},
       {:yaml_elixir, "~> 2.4", only: [:dev, :test]},
       {:benchee, "~> 1.0", only: [:dev, :test]}
     ]
